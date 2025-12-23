@@ -1,19 +1,31 @@
 #!/usr/bin/env bash
 set -e
 
+# --------------------------------------------------
+# Elevate to sudo if needed
+# --------------------------------------------------
+if [ "$EUID" -ne 0 ]; then
+    echo "Re-running installer with sudo..."
+    exec sudo bash "$0" "$@"
+fi
+
 APP_NAME="rv-generator"
 APP_DIR="/usr/local/${APP_NAME}"
-APP_USER="bluecloud"
-VENV_DIR="${APP_DIR}/venv"
-SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 REPO_URL="https://github.com/teknoprep/rv-generator.git"
+SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
+
+# Determine the non-root user
+APP_USER="${SUDO_USER:-root}"
+USER_HOME=$(eval echo "~${APP_USER}")
+VENV_DIR="${APP_DIR}/venv"
 
 echo "======================================"
 echo " RV Generator Installer / Updater"
+echo " User: ${APP_USER}"
 echo "======================================"
 
 # --------------------------------------------------
-# 1. System dependencies (install if missing)
+# 1. System dependencies
 # --------------------------------------------------
 echo "[1/7] Checking system packages..."
 
@@ -26,6 +38,8 @@ REQUIRED_PACKAGES=(
     libgpiod3
     i2c-tools
 )
+
+apt update
 
 for pkg in "${REQUIRED_PACKAGES[@]}"; do
     if ! dpkg -s "$pkg" >/dev/null 2>&1; then
@@ -52,12 +66,10 @@ echo "[3/7] Syncing GitHub repository..."
 if [ -d "${APP_DIR}/.git" ]; then
     echo "Repository exists, pulling updates..."
     cd "${APP_DIR}"
-    git fetch origin
-    git pull
+    sudo -u "${APP_USER}" git pull
 else
     echo "Cloning repository..."
-    git clone "${REPO_URL}" "${APP_DIR}"
-    chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
+    sudo -u "${APP_USER}" git clone "${REPO_URL}" "${APP_DIR}"
 fi
 
 # --------------------------------------------------
@@ -79,15 +91,7 @@ echo "[5/7] Installing/updating Python dependencies..."
 
 sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --upgrade pip setuptools wheel
 
-if [ -f "${APP_DIR}/requirements.txt" ]; then
-    sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --upgrade -r "${APP_DIR}/requirements.txt"
-else
-    echo "WARNING: requirements.txt not found, installing defaults"
-    sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --upgrade \
-        RPi.GPIO \
-        adafruit-circuitpython-dht \
-        adafruit-circuitpython-ina226
-fi
+sudo -u "${APP_USER}" "${VENV_DIR}/bin/pip" install --upgrade -r "${APP_DIR}/requirements.txt"
 
 # --------------------------------------------------
 # 6. systemd service
@@ -122,16 +126,10 @@ echo "[7/7] Reloading and restarting service..."
 systemctl daemon-reexec
 systemctl daemon-reload
 
-if systemctl is-enabled --quiet "${APP_NAME}.service"; then
-    echo "Service already enabled"
-else
-    systemctl enable "${APP_NAME}.service"
-fi
-
+systemctl enable "${APP_NAME}.service"
 systemctl restart "${APP_NAME}.service"
 
 echo "======================================"
 echo " ✅ RV Generator install/update complete"
 echo "======================================"
-echo
 systemctl status "${APP_NAME}.service" --no-pager
