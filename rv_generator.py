@@ -31,10 +31,12 @@ MIN_RUN_TIME     = int(os.getenv("MIN_RUN_TIME", "1800"))
 RETRY_DELAY      = int(os.getenv("RETRY_DELAY", "60"))
 MAX_ATTEMPTS     = int(os.getenv("MAX_START_ATTEMPTS", "3"))
 
+VOLTAGE_SAMPLE_INTERVAL = int(os.getenv("VOLTAGE_SAMPLE_INTERVAL", "10"))
+TEMP_SAMPLE_INTERVAL    = int(os.getenv("TEMP_SAMPLE_INTERVAL", "60"))
+
 # ------------------ INA226 ------------------
 I2C_BUS     = int(os.getenv("I2C_BUS", "1"))
 INA_ADDRESS = int(os.getenv("INA226_ADDR", "0x40"), 16)
-SAMPLE_INTERVAL = int(os.getenv("VOLTAGE_SAMPLE_INTERVAL", "5"))
 
 # ------------------ GPIO / Relays ------------------
 GPIO_CHIP = os.getenv("GPIO_CHIP", "/dev/gpiochip4")
@@ -47,7 +49,6 @@ TEMP_GPIO = int(os.getenv("TEMP_GPIO", "4"))
 TEMP_START_BELOW = float(os.getenv("TEMP_START_BELOW", "40.0"))
 
 # ------------------ Logging ------------------
-LOG_INTERVAL = int(os.getenv("LOG_INTERVAL", "30"))
 LOG_FILE = os.getenv("LOG_FILE", "/usr/local/rv-generator/rv-generator.log")
 
 # ------------------ SMTP ------------------
@@ -74,13 +75,6 @@ def log_line(msg):
         pass
     print(line)
 
-def get_last_log_lines(n=20):
-    try:
-        with open(LOG_FILE, "r") as f:
-            return "".join(f.readlines()[-n:])
-    except Exception:
-        return "(log unavailable)"
-
 # ==================================================
 # Email
 # ==================================================
@@ -92,10 +86,7 @@ def send_email(msg_text):
         msg["From"] = SMTP_FROM
         msg["To"] = SMTP_TO
         msg["Subject"] = SMTP_SUBJECT
-        msg.set_content(
-            f"{msg_text}\n\nLast 20 log lines:\n"
-            f"----------------------\n{get_last_log_lines()}"
-        )
+        msg.set_content(msg_text)
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10) as s:
             if SMTP_TLS:
                 s.starttls()
@@ -111,7 +102,8 @@ def send_email(msg_text):
 REG_CONFIG = 0x00
 REG_BUS_VOLTAGE = 0x02
 
-def swap16(v): return ((v << 8) & 0xFF00) | (v >> 8)
+def swap16(v):
+    return ((v << 8) & 0xFF00) | (v >> 8)
 
 bus = SMBus(I2C_BUS)
 
@@ -124,9 +116,11 @@ def read_voltage():
     return raw * 0.00125
 
 # ==================================================
-# Temperature (optional, safe)
+# Temperature (optional, rate-limited)
 # ==================================================
 temp_sensor = None
+last_temp_f = None
+
 if TEMP_ENABLED:
     try:
         import adafruit_dht
@@ -138,31 +132,26 @@ if TEMP_ENABLED:
         log_line(f"TEMP SENSOR ERROR: {e}")
 
 def read_temp_f():
+    global last_temp_f
     if not TEMP_ENABLED or not temp_sensor:
         return None
     try:
         c = temp_sensor.temperature
-        return (c * 9 / 5) + 32 if c is not None else None
+        if c is not None:
+            last_temp_f = (c * 9 / 5) + 32
+        return last_temp_f
     except Exception:
-        return None
+        return last_temp_f
 
 # ==================================================
-# GPIO via libgpiod v2 (CORRECT)
+# GPIO via libgpiod v2
 # ==================================================
 chip = gpiod.Chip(GPIO_CHIP)
 
 lines = chip.request_lines(
     {
-        RELAY_START_LINE: gpiod.LineSettings(
-            direction=Direction.OUTPUT,
-            output_value=Value.INACTIVE,
-            active_low=False
-        ),
-        RELAY_STOP_LINE: gpiod.LineSettings(
-            direction=Direction.OUTPUT,
-            output_value=Value.INACTIVE,
-            active_low=False
-        ),
+        RELAY_START_LINE: gpiod.LineSettings(Direction.OUTPUT, Value.INACTIVE, active_low=False),
+        RELAY_STOP_LINE:  gpiod.LineSettings(Direction.OUTPUT, Value.INACTIVE, active_low=False),
     },
     consumer="rv-generator"
 )
@@ -198,17 +187,26 @@ def main():
     run_start = None
     attempts = 0
 
+    last_voltage_time = 0
+    last_temp_time = 0
+
+    voltage = read_voltage()
+    temp_f = None
+
     while True:
-        voltage = read_voltage()
-        temp_f = read_temp_f()
         now = time.time()
 
-        if temp_f is not None:
-            log_line(f"Voltage: {voltage:.2f} V | Temp: {temp_f:.1f} F")
-        else:
-            log_line(f"Voltage: {voltage:.2f} V")
+        if now - last_voltage_time >= VOLTAGE_SAMPLE_INTERVAL:
+            voltage = read_voltage()
+            last_voltage_time = now
+            log_line(f"Battery Voltage: {voltage:.2f} V")
 
-        # Decide if temp requires generator
+        if TEMP_ENABLED and now - last_temp_time >= TEMP_SAMPLE_INTERVAL:
+            temp_f = read_temp_f()
+            if temp_f is not None:
+                log_line(f"Temperature: {temp_f:.1f} F")
+            last_temp_time = now
+
         temp_requires_start = TEMP_ENABLED and temp_f is not None and temp_f < TEMP_START_BELOW
 
         if not generator_running:
@@ -236,7 +234,7 @@ def main():
                     send_email(msg)
 
         else:
-            if now - run_start >= MIN_RUN_TIME and voltage >= VOLTAGE_STOP:
+            if time.time() - run_start >= MIN_RUN_TIME and voltage >= VOLTAGE_STOP:
                 msg = "Stopping generator (battery charged)"
                 log_line(msg)
                 send_email(msg)
@@ -244,7 +242,7 @@ def main():
                 generator_running = False
                 run_start = None
 
-        time.sleep(SAMPLE_INTERVAL)
+        time.sleep(1)
 
 if __name__ == "__main__":
     main()
