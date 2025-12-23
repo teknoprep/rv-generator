@@ -5,11 +5,15 @@ import time
 import signal
 import sys
 from datetime import datetime
+import smtplib
+from email.message import EmailMessage
 
 from dotenv import load_dotenv
 from smbus2 import SMBus
 import gpiod
 from gpiod.line import Direction, Value
+import adafruit_dht
+import board
 
 # ==================================================
 # Load configuration
@@ -18,7 +22,7 @@ ENV_PATH = "/usr/local/rv-generator/.env"
 load_dotenv(ENV_PATH)
 
 # ------------------ Voltage thresholds ------------------
-VOLTAGE_START = float(os.getenv("VOLTAGE_START", "12.0"))
+VOLTAGE_START = float(os.getenv("VOLTAGE_START", "12.3"))
 VOLTAGE_STOP  = float(os.getenv("VOLTAGE_STOP", "13.6"))
 
 # ------------------ Timing (seconds) ------------------
@@ -35,86 +39,128 @@ SAMPLE_INTERVAL = int(os.getenv("VOLTAGE_SAMPLE_INTERVAL", "5"))
 
 # ------------------ GPIO / Relays ------------------
 GPIO_CHIP = os.getenv("GPIO_CHIP", "/dev/gpiochip4")
-
 RELAY_START_LINE = int(os.getenv("RELAY_START_GPIO", "5"))
 RELAY_STOP_LINE  = int(os.getenv("RELAY_STOP_GPIO", "6"))
 
+# ------------------ Temperature ------------------
+TEMP_ENABLED = os.getenv("TEMP_ENABLED", "false").lower() == "true"
+TEMP_GPIO = int(os.getenv("TEMP_GPIO", "4"))
+TEMP_START_BELOW = float(os.getenv("TEMP_START_BELOW", "40.0"))
+
 # ------------------ Logging ------------------
 LOG_INTERVAL = int(os.getenv("LOG_INTERVAL", "30"))
-LOG_FILE = os.getenv(
-    "LOG_FILE",
-    "/usr/local/rv-generator/rv-generator.log"
-)
+LOG_FILE = os.getenv("LOG_FILE", "/usr/local/rv-generator/rv-generator.log")
+
+# ------------------ SMTP / Email ------------------
+SMTP_ENABLED = os.getenv("SMTP_ENABLED", "false").lower() == "true"
+SMTP_SERVER  = os.getenv("SMTP_SERVER", "")
+SMTP_PORT    = int(os.getenv("SMTP_PORT", "0"))
+SMTP_USER    = os.getenv("SMTP_USER", "")
+SMTP_PASS    = os.getenv("SMTP_PASS", "")
+SMTP_FROM    = os.getenv("SMTP_FROM", "")
+SMTP_TO      = os.getenv("SMTP_TO", "")
+SMTP_SUBJECT = os.getenv("SMTP_SUBJECT", "RV Alerts")
 
 # ==================================================
 # Logging helper
 # ==================================================
-def log_line(message: str):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"{timestamp} {message}"
-
-    # Write to file
+def log_line(message):
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"{ts} {message}"
     try:
         with open(LOG_FILE, "a") as f:
             f.write(line + "\n")
-    except Exception as e:
-        print(f"{timestamp} LOG FILE ERROR: {e}")
-
-    # Always print to stdout for journalctl
+    except Exception:
+        pass
     print(line)
+
+def get_last_log_lines(n=20):
+    try:
+        with open(LOG_FILE, "r") as f:
+            return "".join(f.readlines()[-n:])
+    except Exception:
+        return "(log unavailable)"
+
+# ==================================================
+# Email helper
+# ==================================================
+def send_email(msg_text):
+    if not SMTP_ENABLED:
+        return
+    try:
+        msg = EmailMessage()
+        msg["From"] = SMTP_FROM
+        msg["To"] = SMTP_TO
+        msg["Subject"] = SMTP_SUBJECT
+        msg.set_content(
+            f"{msg_text}\n\nLast 20 log lines:\n"
+            f"----------------------\n{get_last_log_lines()}"
+        )
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10) as s:
+            s.starttls()
+            s.login(SMTP_USER, SMTP_PASS)
+            s.send_message(msg)
+    except Exception as e:
+        log_line(f"EMAIL ERROR: {e}")
 
 # ==================================================
 # INA226
 # ==================================================
-REG_CONFIG      = 0x00
+REG_CONFIG = 0x00
 REG_BUS_VOLTAGE = 0x02
 
-def swap16(val: int) -> int:
-    return ((val << 8) & 0xFF00) | (val >> 8)
+def swap16(v): return ((v << 8) & 0xFF00) | (v >> 8)
 
 bus = SMBus(I2C_BUS)
 
 def ina_init():
-    # Continuous bus voltage conversion
-    config = 0x4127
-    bus.write_word_data(INA_ADDRESS, REG_CONFIG, swap16(config))
+    bus.write_word_data(INA_ADDRESS, REG_CONFIG, swap16(0x4127))
     log_line("INA226 initialized")
 
-def read_voltage() -> float:
-    raw = bus.read_word_data(INA_ADDRESS, REG_BUS_VOLTAGE)
-    raw = swap16(raw)
-    return raw * 0.00125  # 1.25 mV per bit
+def read_voltage():
+    raw = swap16(bus.read_word_data(INA_ADDRESS, REG_BUS_VOLTAGE))
+    return raw * 0.00125
+
+# ==================================================
+# Temperature (DHT22)
+# ==================================================
+dht = None
+if TEMP_ENABLED:
+    dht = adafruit_dht.DHT22(getattr(board, f"D{TEMP_GPIO}"))
+    log_line("Temperature sensor enabled")
+
+def read_temperature_f():
+    if not dht:
+        return None
+    try:
+        c = dht.temperature
+        return (c * 9 / 5) + 32 if c is not None else None
+    except Exception:
+        return None
 
 # ==================================================
 # GPIO via libgpiod v2
 # ==================================================
 chip = gpiod.Chip(GPIO_CHIP)
-
 lines = chip.request_lines(
     consumer="rv-generator",
     config={
-        RELAY_START_LINE: gpiod.LineSettings(
-            direction=Direction.OUTPUT,
-            output_value=Value.INACTIVE
-        ),
-        RELAY_STOP_LINE: gpiod.LineSettings(
-            direction=Direction.OUTPUT,
-            output_value=Value.INACTIVE
-        ),
+        RELAY_START_LINE: gpiod.LineSettings(Direction.OUTPUT, Value.INACTIVE),
+        RELAY_STOP_LINE:  gpiod.LineSettings(Direction.OUTPUT, Value.INACTIVE),
     }
 )
 
-def pulse(line_offset: int, seconds: int):
-    log_line(f"Pulsing relay {line_offset} for {seconds}s")
-    lines.set_value(line_offset, Value.ACTIVE)
-    time.sleep(seconds)
-    lines.set_value(line_offset, Value.INACTIVE)
+def pulse(line, sec):
+    log_line(f"Pulsing relay {line} for {sec}s")
+    lines.set_value(line, Value.ACTIVE)
+    time.sleep(sec)
+    lines.set_value(line, Value.INACTIVE)
 
 # ==================================================
 # Shutdown handler
 # ==================================================
-def shutdown_handler(signum, frame):
-    log_line("Shutting down service, turning relays OFF")
+def shutdown_handler(*_):
+    log_line("Service shutting down")
     lines.set_value(RELAY_START_LINE, Value.INACTIVE)
     lines.set_value(RELAY_STOP_LINE, Value.INACTIVE)
     lines.release()
@@ -129,61 +175,62 @@ signal.signal(signal.SIGTERM, shutdown_handler)
 # ==================================================
 def main():
     log_line("RV Generator Controller started")
-    log_line(f"Using GPIO chip: {GPIO_CHIP}")
-
     ina_init()
 
     generator_running = False
-    run_start_time = None
-    start_attempts = 0
+    run_start = None
+    attempts = 0
     last_log = 0
 
     while True:
         voltage = read_voltage()
+        temp_f = read_temperature_f()
         now = time.time()
 
-        # Periodic voltage logging
         if now - last_log >= LOG_INTERVAL:
-            log_line(f"Battery Voltage: {voltage:.2f} V")
+            if temp_f is not None:
+                log_line(f"Voltage: {voltage:.2f} V | Temp: {temp_f:.1f} F")
+            else:
+                log_line(f"Voltage: {voltage:.2f} V")
             last_log = now
 
-        # ---------------- Generator NOT running ----------------
+        start_due_to_temp = TEMP_ENABLED and temp_f is not None and temp_f < TEMP_START_BELOW
+
         if not generator_running:
-            if voltage < VOLTAGE_START:
-                if start_attempts < MAX_ATTEMPTS:
-                    log_line(
-                        f"Voltage low ({voltage:.2f} V < {VOLTAGE_START:.2f} V), starting generator"
-                    )
+            if voltage < VOLTAGE_START or start_due_to_temp:
+                if attempts < MAX_ATTEMPTS:
+                    reason = "low voltage" if voltage < VOLTAGE_START else "low temperature"
+                    msg = f"Starting generator due to {reason}"
+                    log_line(msg)
+                    send_email(msg)
                     pulse(RELAY_START_LINE, START_PULSE_TIME)
-                    start_attempts += 1
+                    attempts += 1
                     time.sleep(RETRY_DELAY)
                 else:
-                    log_line("Max start attempts reached, waiting")
+                    msg = "Generator failed to start after max attempts"
+                    log_line(msg)
+                    send_email(msg)
             else:
-                start_attempts = 0
+                attempts = 0
 
-            # Detect successful start
             if voltage > (VOLTAGE_START + 0.5):
                 generator_running = True
-                run_start_time = now
-                start_attempts = 0
-                log_line("Generator detected as running")
+                run_start = now
+                attempts = 0
+                msg = "Generator detected as running"
+                log_line(msg)
+                send_email(msg)
 
-        # ---------------- Generator running ----------------
         else:
-            run_time = now - run_start_time
-            if run_time >= MIN_RUN_TIME and voltage >= VOLTAGE_STOP:
-                log_line(
-                    f"Voltage high ({voltage:.2f} V >= {VOLTAGE_STOP:.2f} V), stopping generator"
-                )
+            if now - run_start >= MIN_RUN_TIME and voltage >= VOLTAGE_STOP:
+                msg = "Stopping generator (battery charged)"
+                log_line(msg)
+                send_email(msg)
                 pulse(RELAY_STOP_LINE, STOP_PULSE_TIME)
                 generator_running = False
-                run_start_time = None
+                run_start = None
 
         time.sleep(SAMPLE_INTERVAL)
 
-# ==================================================
-# Entry point
-# ==================================================
 if __name__ == "__main__":
     main()
