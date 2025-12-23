@@ -4,7 +4,10 @@ import time
 import os
 import signal
 import sys
-import smbus
+try:
+    from smbus2 import SMBus
+except ImportError:
+    from smbus import SMBus
 import RPi.GPIO as GPIO
 from dotenv import load_dotenv
 
