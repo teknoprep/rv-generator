@@ -69,23 +69,31 @@ def log_line(msg):
     print(line)
 
 # ==================================================
-# Email
+# Email (with explicit logging)
 # ==================================================
 def send_email(msg_text):
     if not SMTP_ENABLED:
+        log_line("EMAIL: SMTP disabled, not sending email")
         return
+
+    log_line(f"EMAIL: Attempting to send alert → {SMTP_TO}")
+
     try:
         msg = EmailMessage()
         msg["From"] = SMTP_FROM
         msg["To"] = SMTP_TO
         msg["Subject"] = SMTP_SUBJECT
         msg.set_content(msg_text)
-        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10) as s:
+
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15) as s:
             if SMTP_TLS:
                 s.starttls()
             if SMTP_USER and SMTP_PASS:
                 s.login(SMTP_USER, SMTP_PASS)
             s.send_message(msg)
+
+        log_line("EMAIL: Sent successfully")
+
     except Exception as e:
         log_line(f"EMAIL ERROR: {e}")
 
@@ -95,7 +103,8 @@ def send_email(msg_text):
 REG_CONFIG = 0x00
 REG_BUS_VOLTAGE = 0x02
 
-def swap16(v): return ((v << 8) & 0xFF00) | (v >> 8)
+def swap16(v):
+    return ((v << 8) & 0xFF00) | (v >> 8)
 
 bus = SMBus(I2C_BUS)
 
@@ -136,7 +145,7 @@ def read_temp_f():
         return last_temp_f
 
 # ==================================================
-# GPIO via libgpiod v2 (CORRECT & SAFE)
+# GPIO via libgpiod v2 (stable)
 # ==================================================
 chip = gpiod.Chip(GPIO_CHIP)
 
@@ -148,7 +157,6 @@ lines = chip.request_lines(
     consumer="rv-generator"
 )
 
-# Ensure both relays start OFF
 lines.set_value(RELAY_START_LINE, Value.INACTIVE)
 lines.set_value(RELAY_STOP_LINE, Value.INACTIVE)
 
@@ -177,6 +185,7 @@ signal.signal(signal.SIGTERM, shutdown_handler)
 # ==================================================
 def main():
     log_line("RV Generator Controller started")
+    log_line(f"SMTP enabled: {SMTP_ENABLED}")
     ina_init()
 
     generator_running = False
@@ -207,7 +216,10 @@ def main():
             if (voltage < VOLTAGE_START or temp_requires_start) and attempts < MAX_ATTEMPTS:
                 start_v = voltage
                 reason = "low voltage" if voltage < VOLTAGE_START else "low temperature"
-                log_line(f"Starting generator due to {reason}")
+                msg = f"Starting generator due to {reason}"
+                log_line(msg)
+                send_email(msg)
+
                 pulse(RELAY_START_LINE, START_PULSE_TIME)
                 time.sleep(RETRY_DELAY)
 
@@ -218,14 +230,20 @@ def main():
                     generator_running = True
                     run_start = time.time()
                     attempts = 0
-                    log_line(f"Generator confirmed running (ΔV={delta:.2f} V)")
+                    msg = f"Generator confirmed running (ΔV={delta:.2f} V)"
+                    log_line(msg)
+                    send_email(msg)
                 else:
                     attempts += 1
-                    log_line(f"Start failed (ΔV={delta:.2f} V)")
+                    msg = f"Start failed (ΔV={delta:.2f} V)"
+                    log_line(msg)
+                    send_email(msg)
 
         else:
             if time.time() - run_start >= MIN_RUN_TIME and voltage >= VOLTAGE_STOP:
-                log_line("Stopping generator (battery charged)")
+                msg = "Stopping generator (battery charged)"
+                log_line(msg)
+                send_email(msg)
                 pulse(RELAY_STOP_LINE, STOP_PULSE_TIME)
                 generator_running = False
                 run_start = None
