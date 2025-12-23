@@ -19,33 +19,27 @@ from gpiod.line import Direction, Value
 ENV_PATH = "/usr/local/rv-generator/.env"
 load_dotenv(ENV_PATH)
 
-# ------------------ Voltage thresholds ------------------
 VOLTAGE_START = float(os.getenv("VOLTAGE_START", "12.3"))
 VOLTAGE_STOP  = float(os.getenv("VOLTAGE_STOP", "13.6"))
 VOLTAGE_RISE_CONFIRM = float(os.getenv("VOLTAGE_RISE_CONFIRM", "0.3"))
 
-# ------------------ Timing ------------------
 START_PULSE_TIME = int(os.getenv("START_PULSE_TIME", "2"))
 STOP_PULSE_TIME  = int(os.getenv("STOP_PULSE_TIME", "2"))
 MIN_RUN_TIME     = int(os.getenv("MIN_RUN_TIME", "1800"))
 RETRY_DELAY      = int(os.getenv("RETRY_DELAY", "60"))
 MAX_ATTEMPTS     = int(os.getenv("MAX_START_ATTEMPTS", "3"))
 
-# ------------------ INA226 ------------------
 I2C_BUS     = int(os.getenv("I2C_BUS", "1"))
 INA_ADDRESS = int(os.getenv("INA226_ADDR", "0x40"), 16)
 SAMPLE_INTERVAL = int(os.getenv("VOLTAGE_SAMPLE_INTERVAL", "5"))
 
-# ------------------ GPIO / Relays ------------------
 GPIO_CHIP = os.getenv("GPIO_CHIP", "/dev/gpiochip4")
 RELAY_START_LINE = int(os.getenv("RELAY_START_GPIO", "5"))
 RELAY_STOP_LINE  = int(os.getenv("RELAY_STOP_GPIO", "6"))
 
-# ------------------ Logging ------------------
 LOG_INTERVAL = int(os.getenv("LOG_INTERVAL", "30"))
 LOG_FILE = os.getenv("LOG_FILE", "/usr/local/rv-generator/rv-generator.log")
 
-# ------------------ SMTP ------------------
 SMTP_ENABLED = os.getenv("SMTP_ENABLED", "false").lower() == "true"
 SMTP_SERVER  = os.getenv("SMTP_SERVER", "")
 SMTP_PORT    = int(os.getenv("SMTP_PORT", "0"))
@@ -69,13 +63,6 @@ def log_line(msg):
         pass
     print(line)
 
-def get_last_log_lines(n=20):
-    try:
-        with open(LOG_FILE, "r") as f:
-            return "".join(f.readlines()[-n:])
-    except Exception:
-        return "(log unavailable)"
-
 # ==================================================
 # Email
 # ==================================================
@@ -87,10 +74,7 @@ def send_email(msg_text):
         msg["From"] = SMTP_FROM
         msg["To"] = SMTP_TO
         msg["Subject"] = SMTP_SUBJECT
-        msg.set_content(
-            f"{msg_text}\n\nLast 20 log lines:\n"
-            f"----------------------\n{get_last_log_lines()}"
-        )
+        msg.set_content(msg_text)
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10) as s:
             if SMTP_TLS:
                 s.starttls()
@@ -119,15 +103,18 @@ def read_voltage():
     return raw * 0.00125
 
 # ==================================================
-# GPIO (libgpiod v2)
+# GPIO via libgpiod v2 (CORRECT)
 # ==================================================
 chip = gpiod.Chip(GPIO_CHIP)
+
 lines = chip.request_lines(
     consumer="rv-generator",
-    config={
-        RELAY_START_LINE: gpiod.LineSettings(Direction.OUTPUT, Value.INACTIVE, active_low=False),
-        RELAY_STOP_LINE:  gpiod.LineSettings(Direction.OUTPUT, Value.INACTIVE, active_low=False),
-    }
+    offsets=[RELAY_START_LINE, RELAY_STOP_LINE],
+    config=gpiod.LineSettings(
+        direction=Direction.OUTPUT,
+        output_value=Value.INACTIVE,
+        active_low=False
+    )
 )
 
 def pulse(line, sec):
@@ -160,41 +147,38 @@ def main():
     generator_running = False
     run_start = None
     attempts = 0
-    last_log = 0
 
     while True:
         voltage = read_voltage()
         now = time.time()
 
-        if now - last_log >= LOG_INTERVAL:
-            log_line(f"Battery Voltage: {voltage:.2f} V")
-            last_log = now
+        log_line(f"Battery Voltage: {voltage:.2f} V")
 
         if not generator_running:
             if voltage < VOLTAGE_START and attempts < MAX_ATTEMPTS:
-                start_voltage = voltage
-                log_line(f"Starting generator (voltage {start_voltage:.2f} V)")
+                start_v = voltage
+                log_line(f"Starting generator (voltage {start_v:.2f} V)")
                 pulse(RELAY_START_LINE, START_PULSE_TIME)
                 time.sleep(RETRY_DELAY)
 
-                new_voltage = read_voltage()
-                delta_v = new_voltage - start_voltage
+                new_v = read_voltage()
+                delta = new_v - start_v
 
-                if delta_v >= VOLTAGE_RISE_CONFIRM:
+                if delta >= VOLTAGE_RISE_CONFIRM:
                     generator_running = True
                     run_start = time.time()
                     attempts = 0
-                    msg = f"Generator confirmed running (ΔV={delta_v:.2f} V)"
+                    msg = f"Generator confirmed running (ΔV={delta:.2f} V)"
                     log_line(msg)
                     send_email(msg)
                 else:
                     attempts += 1
-                    msg = f"Start attempt failed (ΔV={delta_v:.2f} V)"
+                    msg = f"Start failed (ΔV={delta:.2f} V)"
                     log_line(msg)
                     send_email(msg)
 
         else:
-            if time.time() - run_start >= MIN_RUN_TIME and voltage >= VOLTAGE_STOP:
+            if now - run_start >= MIN_RUN_TIME and voltage >= VOLTAGE_STOP:
                 msg = "Stopping generator (battery charged)"
                 log_line(msg)
                 send_email(msg)
