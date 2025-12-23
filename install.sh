@@ -27,7 +27,7 @@ apt install -y \
     python3-smbus \
     python3-dotenv \
     python3-libgpiod \
-    python3-adafruit-dht \
+    python3-adafruit-circuitpython-dht \
     i2c-tools
 
 echo "[2/6] Fetching latest code..."
