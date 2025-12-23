@@ -22,6 +22,7 @@ load_dotenv(ENV_PATH)
 # ------------------ Voltage thresholds ------------------
 VOLTAGE_START = float(os.getenv("VOLTAGE_START", "12.3"))
 VOLTAGE_STOP  = float(os.getenv("VOLTAGE_STOP", "13.6"))
+VOLTAGE_RISE_CONFIRM = float(os.getenv("VOLTAGE_RISE_CONFIRM", "0.3"))
 
 # ------------------ Timing ------------------
 START_PULSE_TIME = int(os.getenv("START_PULSE_TIME", "2"))
@@ -56,7 +57,7 @@ SMTP_SUBJECT = os.getenv("SMTP_SUBJECT", "RV Alerts")
 SMTP_TLS     = os.getenv("SMTP_TLS", "true").lower() == "true"
 
 # ==================================================
-# Logging helpers
+# Logging
 # ==================================================
 def log_line(msg):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -76,7 +77,7 @@ def get_last_log_lines(n=20):
         return "(log unavailable)"
 
 # ==================================================
-# Email helper
+# Email
 # ==================================================
 def send_email(msg_text):
     if not SMTP_ENABLED:
@@ -105,8 +106,7 @@ def send_email(msg_text):
 REG_CONFIG = 0x00
 REG_BUS_VOLTAGE = 0x02
 
-def swap16(v):
-    return ((v << 8) & 0xFF00) | (v >> 8)
+def swap16(v): return ((v << 8) & 0xFF00) | (v >> 8)
 
 bus = SMBus(I2C_BUS)
 
@@ -119,23 +119,14 @@ def read_voltage():
     return raw * 0.00125
 
 # ==================================================
-# GPIO via libgpiod v2
+# GPIO (libgpiod v2)
 # ==================================================
 chip = gpiod.Chip(GPIO_CHIP)
-
 lines = chip.request_lines(
     consumer="rv-generator",
     config={
-        RELAY_START_LINE: gpiod.LineSettings(
-            direction=Direction.OUTPUT,
-            output_value=Value.INACTIVE,
-            active_low=False
-        ),
-        RELAY_STOP_LINE: gpiod.LineSettings(
-            direction=Direction.OUTPUT,
-            output_value=Value.INACTIVE,
-            active_low=False
-        ),
+        RELAY_START_LINE: gpiod.LineSettings(Direction.OUTPUT, Value.INACTIVE, active_low=False),
+        RELAY_STOP_LINE:  gpiod.LineSettings(Direction.OUTPUT, Value.INACTIVE, active_low=False),
     }
 )
 
@@ -146,7 +137,7 @@ def pulse(line, sec):
     lines.set_value(line, Value.INACTIVE)
 
 # ==================================================
-# Shutdown handler
+# Shutdown
 # ==================================================
 def shutdown_handler(*_):
     log_line("Service shutting down")
@@ -164,56 +155,46 @@ signal.signal(signal.SIGTERM, shutdown_handler)
 # ==================================================
 def main():
     log_line("RV Generator Controller started")
-    log_line(f"Using GPIO chip: {GPIO_CHIP}")
     ina_init()
 
     generator_running = False
     run_start = None
     attempts = 0
     last_log = 0
-    start_requested = False
 
     while True:
         voltage = read_voltage()
         now = time.time()
 
-        # Periodic logging
         if now - last_log >= LOG_INTERVAL:
             log_line(f"Battery Voltage: {voltage:.2f} V")
             last_log = now
 
-        # -------- Generator NOT running --------
         if not generator_running:
-            if voltage < VOLTAGE_START:
-                if attempts < MAX_ATTEMPTS:
-                    msg = f"Starting generator (voltage {voltage:.2f} V)"
+            if voltage < VOLTAGE_START and attempts < MAX_ATTEMPTS:
+                start_voltage = voltage
+                log_line(f"Starting generator (voltage {start_voltage:.2f} V)")
+                pulse(RELAY_START_LINE, START_PULSE_TIME)
+                time.sleep(RETRY_DELAY)
+
+                new_voltage = read_voltage()
+                delta_v = new_voltage - start_voltage
+
+                if delta_v >= VOLTAGE_RISE_CONFIRM:
+                    generator_running = True
+                    run_start = time.time()
+                    attempts = 0
+                    msg = f"Generator confirmed running (ΔV={delta_v:.2f} V)"
                     log_line(msg)
                     send_email(msg)
-                    pulse(RELAY_START_LINE, START_PULSE_TIME)
-                    attempts += 1
-                    start_requested = True
-                    time.sleep(RETRY_DELAY)
                 else:
-                    msg = "Generator failed to start after max attempts"
+                    attempts += 1
+                    msg = f"Start attempt failed (ΔV={delta_v:.2f} V)"
                     log_line(msg)
                     send_email(msg)
-            else:
-                attempts = 0
-                start_requested = False
 
-            # ✅ FIXED: detect running only AFTER a start was requested
-            if start_requested and voltage >= VOLTAGE_STOP:
-                generator_running = True
-                run_start = now
-                attempts = 0
-                start_requested = False
-                msg = "Generator detected as running (charging voltage reached)"
-                log_line(msg)
-                send_email(msg)
-
-        # -------- Generator running --------
         else:
-            if now - run_start >= MIN_RUN_TIME and voltage >= VOLTAGE_STOP:
+            if time.time() - run_start >= MIN_RUN_TIME and voltage >= VOLTAGE_STOP:
                 msg = "Stopping generator (battery charged)"
                 log_line(msg)
                 send_email(msg)
