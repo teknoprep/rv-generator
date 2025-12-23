@@ -90,7 +90,8 @@ def send_email(msg_text):
 REG_CONFIG = 0x00
 REG_BUS_VOLTAGE = 0x02
 
-def swap16(v): return ((v << 8) & 0xFF00) | (v >> 8)
+def swap16(v):
+    return ((v << 8) & 0xFF00) | (v >> 8)
 
 bus = SMBus(I2C_BUS)
 
@@ -108,8 +109,8 @@ def read_voltage():
 chip = gpiod.Chip(GPIO_CHIP)
 
 lines = chip.request_lines(
+    [RELAY_START_LINE, RELAY_STOP_LINE],
     consumer="rv-generator",
-    offsets=[RELAY_START_LINE, RELAY_STOP_LINE],
     config=gpiod.LineSettings(
         direction=Direction.OUTPUT,
         output_value=Value.INACTIVE,
