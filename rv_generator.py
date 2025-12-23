@@ -56,7 +56,7 @@ SMTP_SUBJECT = os.getenv("SMTP_SUBJECT", "RV Alerts")
 SMTP_TLS     = os.getenv("SMTP_TLS", "true").lower() == "true"
 
 # ==================================================
-# Logging
+# Logging helpers
 # ==================================================
 def log_line(msg):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -76,7 +76,7 @@ def get_last_log_lines(n=20):
         return "(log unavailable)"
 
 # ==================================================
-# Email
+# Email helper
 # ==================================================
 def send_email(msg_text):
     if not SMTP_ENABLED:
@@ -146,7 +146,7 @@ def pulse(line, sec):
     lines.set_value(line, Value.INACTIVE)
 
 # ==================================================
-# Shutdown
+# Shutdown handler
 # ==================================================
 def shutdown_handler(*_):
     log_line("Service shutting down")
@@ -171,6 +171,7 @@ def main():
     run_start = None
     attempts = 0
     last_log = 0
+    start_requested = False
 
     while True:
         voltage = read_voltage()
@@ -190,6 +191,7 @@ def main():
                     send_email(msg)
                     pulse(RELAY_START_LINE, START_PULSE_TIME)
                     attempts += 1
+                    start_requested = True
                     time.sleep(RETRY_DELAY)
                 else:
                     msg = "Generator failed to start after max attempts"
@@ -197,12 +199,14 @@ def main():
                     send_email(msg)
             else:
                 attempts = 0
+                start_requested = False
 
-            # ✅ FIXED: only detect running AFTER start AND charging voltage
-            if attempts > 0 and voltage >= VOLTAGE_STOP:
+            # ✅ FIXED: detect running only AFTER a start was requested
+            if start_requested and voltage >= VOLTAGE_STOP:
                 generator_running = True
                 run_start = now
                 attempts = 0
+                start_requested = False
                 msg = "Generator detected as running (charging voltage reached)"
                 log_line(msg)
                 send_email(msg)
