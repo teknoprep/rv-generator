@@ -11,7 +11,7 @@ from email.message import EmailMessage
 from dotenv import load_dotenv
 from smbus2 import SMBus
 import gpiod
-from gpiod.line import Direction
+from gpiod.line import Direction, Value
 
 # ==================================================
 # Load configuration
@@ -109,7 +109,7 @@ def read_voltage():
     return raw * 0.00125
 
 # ==================================================
-# GPIO via libgpiod v2 (FIXED)
+# GPIO via libgpiod v2 (CORRECT)
 # ==================================================
 chip = gpiod.Chip(GPIO_CHIP)
 
@@ -118,28 +118,30 @@ lines = chip.request_lines(
     config={
         RELAY_START_LINE: gpiod.LineSettings(
             direction=Direction.OUTPUT,
-            output_value=0
+            output_value=Value.INACTIVE,
+            active_low=False
         ),
         RELAY_STOP_LINE: gpiod.LineSettings(
             direction=Direction.OUTPUT,
-            output_value=0
+            output_value=Value.INACTIVE,
+            active_low=False
         ),
     }
 )
 
-def pulse(line, seconds):
-    log_line(f"Pulsing relay {line} for {seconds}s")
-    lines.set_value(line, 1)
-    time.sleep(seconds)
-    lines.set_value(line, 0)
+def pulse(line, sec):
+    log_line(f"Pulsing relay {line} for {sec}s")
+    lines.set_value(line, Value.ACTIVE)
+    time.sleep(sec)
+    lines.set_value(line, Value.INACTIVE)
 
 # ==================================================
 # Shutdown
 # ==================================================
 def shutdown_handler(*_):
     log_line("Service shutting down")
-    lines.set_value(RELAY_START_LINE, 0)
-    lines.set_value(RELAY_STOP_LINE, 0)
+    lines.set_value(RELAY_START_LINE, Value.INACTIVE)
+    lines.set_value(RELAY_STOP_LINE, Value.INACTIVE)
     lines.release()
     chip.close()
     sys.exit(0)
