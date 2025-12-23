@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -e
 
+# --------------------------------------------------
+# Elevate if needed
+# --------------------------------------------------
 if [ "$EUID" -ne 0 ]; then
     echo "Re-running installer with sudo..."
     exec sudo bash "$0" "$@"
@@ -18,27 +21,46 @@ echo " RV Generator Installer / Updater"
 echo " User: ${APP_USER}"
 echo "======================================"
 
+# --------------------------------------------------
+# 1. System packages (APT)
+# --------------------------------------------------
 echo "[1/6] Installing system packages..."
 
 apt update
 apt install -y \
     git \
     python3 \
+    python3-pip \
     python3-smbus \
     python3-dotenv \
     python3-libgpiod \
-    python3-adafruit-circuitpython-dht \
     i2c-tools
 
-echo "[2/6] Fetching latest code..."
+# --------------------------------------------------
+# 2. Python packages (PIP - system Python, PEP 668)
+# --------------------------------------------------
+echo "[2/6] Installing Python packages via pip (system Python)..."
+
+pip3 install --break-system-packages \
+    smbus2 \
+    adafruit-circuitpython-dht
+
+# --------------------------------------------------
+# 3. Fetch repo to temp directory
+# --------------------------------------------------
+echo "[3/6] Fetching latest code from GitHub..."
 
 rm -rf "$TMP_DIR"
 sudo -u "$APP_USER" git clone "$REPO_URL" "$TMP_DIR"
 
-echo "[3/6] Syncing application files..."
+# --------------------------------------------------
+# 4. Sync repo into install directory
+# --------------------------------------------------
+echo "[4/6] Syncing application files..."
 
 mkdir -p "$APP_DIR"
 
+# Preserve existing .env
 if [ -f "$APP_DIR/.env" ]; then
     rsync -a --delete --exclude=".env" "$TMP_DIR/" "$APP_DIR/"
 else
@@ -47,13 +69,19 @@ fi
 
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
-echo "[4/6] Ensuring log file exists..."
+# --------------------------------------------------
+# 5. Ensure log file exists
+# --------------------------------------------------
+echo "[5/6] Ensuring log file exists..."
 
 LOG_FILE="$APP_DIR/rv-generator.log"
 touch "$LOG_FILE"
 chmod 644 "$LOG_FILE"
 
-echo "[5/6] Installing systemd service..."
+# --------------------------------------------------
+# 6. Install / update systemd service
+# --------------------------------------------------
+echo "[6/6] Installing/updating systemd service..."
 
 cat <<EOF > "$SERVICE_FILE"
 [Unit]
@@ -71,8 +99,6 @@ User=root
 [Install]
 WantedBy=multi-user.target
 EOF
-
-echo "[6/6] Reloading and restarting service..."
 
 systemctl daemon-reexec
 systemctl daemon-reload
