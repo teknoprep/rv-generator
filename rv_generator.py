@@ -19,39 +19,32 @@ from gpiod.line import Direction, Value
 ENV_PATH = "/usr/local/rv-generator/.env"
 load_dotenv(ENV_PATH)
 
-# ------------------ Voltage ------------------
 VOLTAGE_START = float(os.getenv("VOLTAGE_START", "12.3"))
 VOLTAGE_STOP  = float(os.getenv("VOLTAGE_STOP", "13.6"))
 VOLTAGE_RISE_CONFIRM = float(os.getenv("VOLTAGE_RISE_CONFIRM", "0.3"))
 
-# ------------------ Timing ------------------
 START_PULSE_TIME = int(os.getenv("START_PULSE_TIME", "2"))
 STOP_PULSE_TIME  = int(os.getenv("STOP_PULSE_TIME", "2"))
 MIN_RUN_TIME     = int(os.getenv("MIN_RUN_TIME", "1800"))
 RETRY_DELAY      = int(os.getenv("RETRY_DELAY", "60"))
 MAX_ATTEMPTS     = int(os.getenv("MAX_START_ATTEMPTS", "3"))
 
-VOLTAGE_SAMPLE_INTERVAL = int(os.getenv("VOLTAGE_SAMPLE_INTERVAL", "10"))
-TEMP_SAMPLE_INTERVAL    = int(os.getenv("TEMP_SAMPLE_INTERVAL", "60"))
-
-# ------------------ INA226 ------------------
 I2C_BUS     = int(os.getenv("I2C_BUS", "1"))
 INA_ADDRESS = int(os.getenv("INA226_ADDR", "0x40"), 16)
 
-# ------------------ GPIO / Relays ------------------
+VOLTAGE_SAMPLE_INTERVAL = int(os.getenv("VOLTAGE_SAMPLE_INTERVAL", "10"))
+TEMP_SAMPLE_INTERVAL    = int(os.getenv("TEMP_SAMPLE_INTERVAL", "60"))
+
 GPIO_CHIP = os.getenv("GPIO_CHIP", "/dev/gpiochip4")
 RELAY_START_LINE = int(os.getenv("RELAY_START_GPIO", "5"))
 RELAY_STOP_LINE  = int(os.getenv("RELAY_STOP_GPIO", "6"))
 
-# ------------------ Temperature ------------------
 TEMP_ENABLED = os.getenv("TEMP_ENABLE", "false").lower() == "true"
 TEMP_GPIO = int(os.getenv("TEMP_GPIO", "4"))
 TEMP_START_BELOW = float(os.getenv("TEMP_START_BELOW", "40.0"))
 
-# ------------------ Logging ------------------
 LOG_FILE = os.getenv("LOG_FILE", "/usr/local/rv-generator/rv-generator.log")
 
-# ------------------ SMTP ------------------
 SMTP_ENABLED = os.getenv("SMTP_ENABLED", "false").lower() == "true"
 SMTP_SERVER  = os.getenv("SMTP_SERVER", "")
 SMTP_PORT    = int(os.getenv("SMTP_PORT", "0"))
@@ -102,8 +95,7 @@ def send_email(msg_text):
 REG_CONFIG = 0x00
 REG_BUS_VOLTAGE = 0x02
 
-def swap16(v):
-    return ((v << 8) & 0xFF00) | (v >> 8)
+def swap16(v): return ((v << 8) & 0xFF00) | (v >> 8)
 
 bus = SMBus(I2C_BUS)
 
@@ -116,7 +108,7 @@ def read_voltage():
     return raw * 0.00125
 
 # ==================================================
-# Temperature (optional, rate-limited)
+# Temperature (optional, rate limited)
 # ==================================================
 temp_sensor = None
 last_temp_f = None
@@ -144,17 +136,21 @@ def read_temp_f():
         return last_temp_f
 
 # ==================================================
-# GPIO via libgpiod v2
+# GPIO via libgpiod v2 (CORRECT & SAFE)
 # ==================================================
 chip = gpiod.Chip(GPIO_CHIP)
 
 lines = chip.request_lines(
     {
-        RELAY_START_LINE: gpiod.LineSettings(Direction.OUTPUT, Value.INACTIVE, active_low=False),
-        RELAY_STOP_LINE:  gpiod.LineSettings(Direction.OUTPUT, Value.INACTIVE, active_low=False),
+        RELAY_START_LINE: gpiod.LineSettings(direction=Direction.OUTPUT),
+        RELAY_STOP_LINE:  gpiod.LineSettings(direction=Direction.OUTPUT),
     },
     consumer="rv-generator"
 )
+
+# Ensure both relays start OFF
+lines.set_value(RELAY_START_LINE, Value.INACTIVE)
+lines.set_value(RELAY_STOP_LINE, Value.INACTIVE)
 
 def pulse(line, sec):
     log_line(f"Pulsing relay {line} for {sec}s")
@@ -186,26 +182,24 @@ def main():
     generator_running = False
     run_start = None
     attempts = 0
-
-    last_voltage_time = 0
-    last_temp_time = 0
-
+    last_voltage = 0
+    last_temp = 0
     voltage = read_voltage()
     temp_f = None
 
     while True:
         now = time.time()
 
-        if now - last_voltage_time >= VOLTAGE_SAMPLE_INTERVAL:
+        if now - last_voltage >= VOLTAGE_SAMPLE_INTERVAL:
             voltage = read_voltage()
-            last_voltage_time = now
             log_line(f"Battery Voltage: {voltage:.2f} V")
+            last_voltage = now
 
-        if TEMP_ENABLED and now - last_temp_time >= TEMP_SAMPLE_INTERVAL:
+        if TEMP_ENABLED and now - last_temp >= TEMP_SAMPLE_INTERVAL:
             temp_f = read_temp_f()
             if temp_f is not None:
                 log_line(f"Temperature: {temp_f:.1f} F")
-            last_temp_time = now
+            last_temp = now
 
         temp_requires_start = TEMP_ENABLED and temp_f is not None and temp_f < TEMP_START_BELOW
 
@@ -224,20 +218,14 @@ def main():
                     generator_running = True
                     run_start = time.time()
                     attempts = 0
-                    msg = f"Generator confirmed running (ΔV={delta:.2f} V)"
-                    log_line(msg)
-                    send_email(msg)
+                    log_line(f"Generator confirmed running (ΔV={delta:.2f} V)")
                 else:
                     attempts += 1
-                    msg = f"Start failed (ΔV={delta:.2f} V)"
-                    log_line(msg)
-                    send_email(msg)
+                    log_line(f"Start failed (ΔV={delta:.2f} V)")
 
         else:
             if time.time() - run_start >= MIN_RUN_TIME and voltage >= VOLTAGE_STOP:
-                msg = "Stopping generator (battery charged)"
-                log_line(msg)
-                send_email(msg)
+                log_line("Stopping generator (battery charged)")
                 pulse(RELAY_STOP_LINE, STOP_PULSE_TIME)
                 generator_running = False
                 run_start = None
