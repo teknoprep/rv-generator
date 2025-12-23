@@ -12,8 +12,6 @@ from dotenv import load_dotenv
 from smbus2 import SMBus
 import gpiod
 from gpiod.line import Direction, Value
-import adafruit_dht
-import board
 
 # ==================================================
 # Load configuration
@@ -25,7 +23,7 @@ load_dotenv(ENV_PATH)
 VOLTAGE_START = float(os.getenv("VOLTAGE_START", "12.3"))
 VOLTAGE_STOP  = float(os.getenv("VOLTAGE_STOP", "13.6"))
 
-# ------------------ Timing (seconds) ------------------
+# ------------------ Timing ------------------
 START_PULSE_TIME = int(os.getenv("START_PULSE_TIME", "2"))
 STOP_PULSE_TIME  = int(os.getenv("STOP_PULSE_TIME", "2"))
 MIN_RUN_TIME     = int(os.getenv("MIN_RUN_TIME", "1800"))
@@ -51,7 +49,7 @@ TEMP_START_BELOW = float(os.getenv("TEMP_START_BELOW", "40.0"))
 LOG_INTERVAL = int(os.getenv("LOG_INTERVAL", "30"))
 LOG_FILE = os.getenv("LOG_FILE", "/usr/local/rv-generator/rv-generator.log")
 
-# ------------------ SMTP / Email ------------------
+# ------------------ SMTP ------------------
 SMTP_ENABLED = os.getenv("SMTP_ENABLED", "false").lower() == "true"
 SMTP_SERVER  = os.getenv("SMTP_SERVER", "")
 SMTP_PORT    = int(os.getenv("SMTP_PORT", "0"))
@@ -64,9 +62,9 @@ SMTP_SUBJECT = os.getenv("SMTP_SUBJECT", "RV Alerts")
 # ==================================================
 # Logging helper
 # ==================================================
-def log_line(message):
+def log_line(msg):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"{ts} {message}"
+    line = f"{ts} {msg}"
     try:
         with open(LOG_FILE, "a") as f:
             f.write(line + "\n")
@@ -122,15 +120,21 @@ def read_voltage():
     return raw * 0.00125
 
 # ==================================================
-# Temperature (DHT22)
+# Temperature (optional, safe)
 # ==================================================
 dht = None
 if TEMP_ENABLED:
-    dht = adafruit_dht.DHT22(getattr(board, f"D{TEMP_GPIO}"))
-    log_line("Temperature sensor enabled")
+    try:
+        import adafruit_dht
+        import board
+        dht = adafruit_dht.DHT22(getattr(board, f"D{TEMP_GPIO}"))
+        log_line("Temperature sensor enabled")
+    except Exception as e:
+        log_line(f"TEMP SENSOR ERROR: {e}")
+        TEMP_ENABLED = False
 
-def read_temperature_f():
-    if not dht:
+def read_temp_f():
+    if not TEMP_ENABLED or not dht:
         return None
     try:
         c = dht.temperature
@@ -175,6 +179,7 @@ signal.signal(signal.SIGTERM, shutdown_handler)
 # ==================================================
 def main():
     log_line("RV Generator Controller started")
+    log_line(f"Using GPIO chip: {GPIO_CHIP}")
     ina_init()
 
     generator_running = False
@@ -184,7 +189,7 @@ def main():
 
     while True:
         voltage = read_voltage()
-        temp_f = read_temperature_f()
+        temp_f = read_temp_f()
         now = time.time()
 
         if now - last_log >= LOG_INTERVAL:
