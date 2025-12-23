@@ -2,7 +2,7 @@
 set -e
 
 # --------------------------------------------------
-# Elevate privileges if needed
+# Elevate if needed
 # --------------------------------------------------
 if [ "$EUID" -ne 0 ]; then
     echo "Re-running installer with sudo..."
@@ -13,11 +13,9 @@ APP_NAME="rv-generator"
 APP_DIR="/usr/local/${APP_NAME}"
 REPO_URL="https://github.com/teknoprep/rv-generator.git"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
+TMP_DIR="/tmp/${APP_NAME}-install"
 
 APP_USER="${SUDO_USER:-root}"
-USER_HOME=$(eval echo "~${APP_USER}")
-VENV_DIR="${APP_DIR}/venv"
-TMP_DIR="/tmp/${APP_NAME}-install"
 
 echo "======================================"
 echo " RV Generator Installer / Updater"
@@ -25,17 +23,15 @@ echo " User: ${APP_USER}"
 echo "======================================"
 
 # --------------------------------------------------
-# 1. System dependencies (install if missing)
+# 1. System dependencies
 # --------------------------------------------------
-echo "[1/7] Checking system packages..."
+echo "[1/6] Checking system packages..."
 
 REQUIRED_PACKAGES=(
     git
     python3
-    python3-full
-    python3-venv
-    python3-pip
     python3-smbus
+    python3-dotenv
     python3-libgpiod
     i2c-tools
 )
@@ -52,18 +48,17 @@ for pkg in "${REQUIRED_PACKAGES[@]}"; do
 done
 
 # --------------------------------------------------
-# 2. Clone or update repository to temp dir
+# 2. Fetch repo to temp directory
 # --------------------------------------------------
-echo "[2/7] Fetching latest code from GitHub..."
+echo "[2/6] Fetching latest code from GitHub..."
 
 rm -rf "$TMP_DIR"
-
 sudo -u "$APP_USER" git clone "$REPO_URL" "$TMP_DIR"
 
 # --------------------------------------------------
-# 3. Sync repo contents to install dir
+# 3. Sync repo into install directory
 # --------------------------------------------------
-echo "[3/7] Syncing application files..."
+echo "[3/6] Syncing application files..."
 
 mkdir -p "$APP_DIR"
 
@@ -77,29 +72,23 @@ fi
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
 # --------------------------------------------------
-# 4. Python virtual environment
+# 4. Ensure log file exists
 # --------------------------------------------------
-echo "[4/7] Checking Python virtual environment..."
+echo "[4/6] Ensuring log file exists..."
 
-if [ ! -d "$VENV_DIR" ]; then
-    echo "Creating virtual environment..."
-    sudo -u "$APP_USER" python3 -m venv "$VENV_DIR"
-else
-    echo "Virtual environment already exists"
+LOG_FILE="$APP_DIR/rv-generator.log"
+
+if [ ! -f "$LOG_FILE" ]; then
+    touch "$LOG_FILE"
 fi
 
-# --------------------------------------------------
-# 5. Python dependencies
-# --------------------------------------------------
-echo "[5/7] Installing/updating Python dependencies..."
-
-sudo -u "$APP_USER" "$VENV_DIR/bin/pip" install --upgrade pip setuptools wheel
-sudo -u "$APP_USER" "$VENV_DIR/bin/pip" install --upgrade -r "$APP_DIR/requirements.txt"
+chown root:root "$LOG_FILE"
+chmod 644 "$LOG_FILE"
 
 # --------------------------------------------------
-# 6. systemd service
+# 5. Install / update systemd service
 # --------------------------------------------------
-echo "[6/7] Installing/updating systemd service..."
+echo "[5/6] Installing/updating systemd service..."
 
 cat <<EOF > "$SERVICE_FILE"
 [Unit]
@@ -108,7 +97,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=$VENV_DIR/bin/python $APP_DIR/rv_generator.py
+ExecStart=/usr/bin/python3 $APP_DIR/rv_generator.py
 WorkingDirectory=$APP_DIR
 Restart=always
 RestartSec=5
@@ -121,9 +110,9 @@ EOF
 chmod 644 "$SERVICE_FILE"
 
 # --------------------------------------------------
-# 7. Reload & restart service
+# 6. Reload systemd and restart service
 # --------------------------------------------------
-echo "[7/7] Reloading and restarting service..."
+echo "[6/6] Reloading systemd and restarting service..."
 
 systemctl daemon-reexec
 systemctl daemon-reload
