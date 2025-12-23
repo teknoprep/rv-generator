@@ -1,2 +1,3 @@
 RPi.GPIO
-adafruit-circuitpython-dht
+python-dotenv
+smbus2
