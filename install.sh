@@ -36,6 +36,7 @@ REQUIRED_PACKAGES=(
     python3-venv
     python3-pip
     python3-smbus
+    python3-libgpiod
     i2c-tools
 )
 
