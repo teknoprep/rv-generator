@@ -70,11 +70,21 @@ Built for **stability, safety, and unattended operation**.
 
 ---
 
-## 📁 Repository Layout
-```text
-rv-generator/
-├── README.md
-├── board1.jpg
-├── src/
-├── systemd/
-└── scripts/
+## 📦 Installation (No Git Required)
+
+These steps install the controller as a **system service** using a normal user
+account with **sudo access**.
+
+### 1️⃣ Download the Project
+- Visit:  
+  👉 https://github.com/teknoprep/rv-generator
+- Click **Code → Download ZIP**
+- Copy the ZIP file to your Raspberry Pi
+- Extract it (right‑click → *Extract* or via terminal)
+
+Or from the terminal:
+```bash
+cd ~
+wget https://github.com/teknoprep/rv-generator/archive/refs/heads/main.zip
+unzip main.zip
+cd rv-generator-main
