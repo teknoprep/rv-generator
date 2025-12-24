@@ -1,5 +1,18 @@
 # 🚐 RV Generator Controller
 
+<p align="center">
+  <img src="https://github.com/teknoprep/rv-generator/blob/main/board1.jpg" width="600"><br>
+  <em>Raspberry Pi–based RV Generator Controller (Prototype Board)</em>
+</p>
+
+A **Raspberry Pi–based automatic generator controller** designed for RV use.  
+This service safely controls generator start/stop relays, monitors system conditions
+(temperature, voltage/current), and runs reliably as a background service at boot.
+
+Built for **stability, safety, and unattended operation**.
+
+---
+
 ## 📦 Installation (No Git Required)
 
 These steps install the controller as a **background system service** using a normal
@@ -55,19 +68,6 @@ sudo systemctl restart rv-generator.service
 ```
 
 The service starts **automatically on boot**.
-
----
-
-<p align="center">
-  <img src="https://github.com/teknoprep/rv-generator/blob/main/board1.jpg" width="600"><br>
-  <em>Raspberry Pi–based RV Generator Controller (Prototype Board)</em>
-</p>
-
-A **Raspberry Pi–based automatic generator controller** designed for RV use.  
-This service safely controls generator start/stop relays, monitors system conditions
-(temperature, voltage/current), and runs reliably as a background service at boot.
-
-Built for **stability, safety, and unattended operation**.
 
 ---
 
