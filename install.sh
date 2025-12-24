@@ -1,112 +1,90 @@
-#!/usr/bin/env bash
-set -e
+# 🚐 RV Generator Controller
 
-# --------------------------------------------------
-# Elevate if needed
-# --------------------------------------------------
-if [ "$EUID" -ne 0 ]; then
-    echo "Re-running installer with sudo..."
-    exec sudo bash "$0" "$@"
-fi
+<p align="center">
+  <img src="https://github.com/teknoprep/rv-generator/blob/main/board1.jpg" width="600"><br>
+  <em>Raspberry Pi–based RV Generator Controller (Prototype Board)</em>
+</p>
 
-APP_NAME="rv-generator"
-APP_DIR="/usr/local/${APP_NAME}"
-REPO_URL="https://github.com/teknoprep/rv-generator.git"
-SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
-TMP_DIR="/tmp/${APP_NAME}-install"
-APP_USER="${SUDO_USER:-root}"
+A **Raspberry Pi–based automatic generator controller** designed for RV use.  
+This service safely controls generator start/stop relays, monitors system conditions
+(temperature, voltage/current), and runs reliably as a background service at boot.
 
-echo "======================================"
-echo " RV Generator Installer / Updater"
-echo " User: ${APP_USER}"
-echo "======================================"
+Built for **stability, safety, and unattended operation**.
 
-# --------------------------------------------------
-# 1. System packages (APT)
-# --------------------------------------------------
-echo "[1/6] Installing system packages..."
+---
 
-apt update
-apt install -y \
-    git \
-    python3 \
-    python3-pip \
-    python3-smbus \
-    python3-dotenv \
-    python3-libgpiod \
-    i2c-tools
+## ✅ Features
+- ✅ Automatic generator control via relays
+- ✅ Designed for **ACTIVE-HIGH relay boards**
+- ✅ Temperature monitoring (DHT22)
+- ✅ Voltage & current monitoring (INA226)
+- ✅ Physical switch inputs supported
+- ✅ Safe startup (all relays OFF)
+- ✅ Runs as a **systemd service**
+- ✅ Clean install with virtual environment (PEP-668 safe)
+- ✅ Logs to `journalctl`
+- ✅ Minimal Raspberry Pi OS footprint
 
-# --------------------------------------------------
-# 2. Python packages (PIP - system Python, PEP 668)
-# --------------------------------------------------
-echo "[2/6] Installing Python packages via pip (system Python)..."
+---
 
-pip3 install --break-system-packages \
-    smbus2 \
-    adafruit-circuitpython-dht
+## 🧰 Hardware Assumptions
+- Raspberry Pi 3B+ (or compatible)
+- 5 V relay module (ACTIVE-HIGH)
+- Generator with momentary START / STOP control
+- DHT22 temperature sensor
+- INA226 power monitor (optional but recommended)
+- Common ground for all logic-level devices
 
-# --------------------------------------------------
-# 3. Fetch repo to temp directory
-# --------------------------------------------------
-echo "[3/6] Fetching latest code from GitHub..."
+---
 
-rm -rf "$TMP_DIR"
-sudo -u "$APP_USER" git clone "$REPO_URL" "$TMP_DIR"
+## 🔌 GPIO Pin Assignments
 
-# --------------------------------------------------
-# 4. Sync repo into install directory
-# --------------------------------------------------
-echo "[4/6] Syncing application files..."
+### Relays (ACTIVE-HIGH)
+| Relay | Physical Pin | GPIO |
+|------|-------------|------|
+| Relay 1 | Pin 29 | GPIO 5 |
+| Relay 2 | Pin 31 | GPIO 6 |
+| Relay 3 | Pin 33 | GPIO 13 |
+| Relay 4 | Pin 35 | GPIO 19 |
 
-mkdir -p "$APP_DIR"
+- `GPIO.HIGH` → Relay **ON**  
+- `GPIO.LOW` → Relay **OFF**  
+- All relays are initialized **OFF** at startup
 
-# Preserve existing .env
-if [ -f "$APP_DIR/.env" ]; then
-    rsync -a --delete --exclude=".env" "$TMP_DIR/" "$APP_DIR/"
-else
-    rsync -a --delete "$TMP_DIR/" "$APP_DIR/"
-fi
+---
 
-chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+### I²C (INA226)
+| Signal | GPIO | Pin |
+|------|------|-----|
+| SDA | GPIO 2 | Pin 3 |
+| SCL | GPIO 3 | Pin 5 |
 
-# --------------------------------------------------
-# 5. Ensure log file exists
-# --------------------------------------------------
-echo "[5/6] Ensuring log file exists..."
+---
 
-LOG_FILE="$APP_DIR/rv-generator.log"
-touch "$LOG_FILE"
-chmod 644 "$LOG_FILE"
+### 🌡️ Temperature Sensor (DHT22)
+| Signal | GPIO | Pin |
+|------|------|-----|
+| DATA | GPIO 4 | Pin 7 |
+| VCC | 3.3 V | Pin 1 |
+| GND | GND | Any |
 
-# --------------------------------------------------
-# 6. Install / update systemd service
-# --------------------------------------------------
-echo "[6/6] Installing/updating systemd service..."
+---
 
-cat <<EOF > "$SERVICE_FILE"
-[Unit]
-Description=RV Generator Controller
-After=network.target
+## 📦 Installation (No Git Required)
 
-[Service]
-Type=simple
-ExecStart=/usr/bin/python3 $APP_DIR/rv_generator.py
-WorkingDirectory=$APP_DIR
-Restart=always
-RestartSec=5
-User=root
+These steps install the controller as a **system service** using a normal user
+account with **sudo access**.
 
-[Install]
-WantedBy=multi-user.target
-EOF
+### 1️⃣ Download the Project
+- Visit:  
+  👉 https://github.com/teknoprep/rv-generator
+- Click **Code → Download ZIP**
+- Copy the ZIP file to your Raspberry Pi
+- Extract it (right‑click → *Extract* or via terminal)
 
-systemctl daemon-reexec
-systemctl daemon-reload
-systemctl enable "$APP_NAME"
-systemctl restart "$APP_NAME"
-
-rm -rf "$TMP_DIR"
-
-echo "======================================"
-echo " ✅ RV Generator install/update complete"
-echo "======================================"
+Or from the terminal:
+```bash
+cd ~
+wget https://github.com/teknoprep/rv-generator/archive/refs/heads/main.zip
+unzip main.zip
+cd rv-generator-main
