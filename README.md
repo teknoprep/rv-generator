@@ -1,5 +1,63 @@
 # 🚐 RV Generator Controller
 
+## 📦 Installation (No Git Required)
+
+These steps install the controller as a **background system service** using a normal
+user account with **sudo access**. No Git knowledge is required.
+
+### 1️⃣ Download the Project
+- Visit:  
+  👉 https://github.com/teknoprep/rv-generator
+- Click **Code → Download ZIP**
+- Copy the ZIP file to your Raspberry Pi
+- Extract it (right‑click → *Extract* or via terminal)
+
+Or from the terminal:
+```bash
+cd ~
+wget https://github.com/teknoprep/rv-generator/archive/refs/heads/main.zip
+unzip main.zip
+cd rv-generator-main
+```
+
+---
+
+### 2️⃣ Run the Installer
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+- You will be prompted for your **sudo password**
+- Python dependencies are installed in a **virtual environment**
+- A **systemd service** is created and enabled
+- All relays are forced **OFF** during setup
+
+---
+
+### 3️⃣ Verify Operation
+```bash
+systemctl status rv-generator.service
+```
+
+View live logs:
+```bash
+journalctl -u rv-generator.service -f
+```
+
+---
+
+### 🔁 Service Control
+```bash
+sudo systemctl start rv-generator.service
+sudo systemctl stop rv-generator.service
+sudo systemctl restart rv-generator.service
+```
+
+The service starts **automatically on boot**.
+
+---
+
 <p align="center">
   <img src="https://github.com/teknoprep/rv-generator/blob/main/board1.jpg" width="600"><br>
   <em>Raspberry Pi–based RV Generator Controller (Prototype Board)</em>
@@ -70,21 +128,26 @@ Built for **stability, safety, and unattended operation**.
 
 ---
 
-## 📦 Installation (No Git Required)
+## ⚠️ Safety Notes
+- Relays are **forced OFF at boot** to prevent unintended generator starts
+- Always test with the generator **disabled** before live operation
+- Ensure proper fuse protection and isolation where required
+- Use a common ground for all logic-level components
 
-These steps install the controller as a **system service** using a normal user
-account with **sudo access**.
+---
 
-### 1️⃣ Download the Project
-- Visit:  
-  👉 https://github.com/teknoprep/rv-generator
-- Click **Code → Download ZIP**
-- Copy the ZIP file to your Raspberry Pi
-- Extract it (right‑click → *Extract* or via terminal)
+## 📁 Repository Layout
+```text
+rv-generator/
+├── README.md
+├── install.sh
+├── board1.jpg
+├── src/
+├── systemd/
+└── scripts/
+```
 
-Or from the terminal:
-```bash
-cd ~
-wget https://github.com/teknoprep/rv-generator/archive/refs/heads/main.zip
-unzip main.zip
-cd rv-generator-main
+---
+
+## 📜 License
+MIT License
