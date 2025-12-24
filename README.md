@@ -6,8 +6,8 @@
 </p>
 
 A **Raspberry Pi–based automatic generator controller** designed for RV use.  
-This service safely controls generator start/stop relays, monitors system conditions
-(temperature, voltage/current), and runs reliably as a background service at boot.
+This service safely controls generator start/stop relays, monitors battery voltage,
+temperature, and system conditions, and runs reliably as a background service at boot.
 
 Built for **stability, safety, and unattended operation**.
 
@@ -23,7 +23,7 @@ user account with **sudo access**. No Git knowledge is required.
   👉 https://github.com/teknoprep/rv-generator
 - Click **Code → Download ZIP**
 - Copy the ZIP file to your Raspberry Pi
-- Extract it (right‑click → *Extract* or via terminal)
+- Extract it
 
 Or from the terminal:
 ```bash
@@ -41,30 +41,17 @@ chmod +x install.sh
 ./install.sh
 ```
 
-- You will be prompted for your **sudo password**
-- Python dependencies are installed in a **virtual environment**
-- A **systemd service** is created and enabled
-- All relays are forced **OFF** during setup
+- Creates a Python virtual environment
+- Installs dependencies (PEP‑668 safe)
+- Installs and enables a **systemd service**
+- Forces **all relays OFF** during setup
 
 ---
 
 ### 3️⃣ Verify Operation
 ```bash
 systemctl status rv-generator.service
-```
-
-View live logs:
-```bash
 journalctl -u rv-generator.service -f
-```
-
----
-
-### 🔁 Service Control
-```bash
-sudo systemctl start rv-generator.service
-sudo systemctl stop rv-generator.service
-sudo systemctl restart rv-generator.service
 ```
 
 The service starts **automatically on boot**.
@@ -72,54 +59,26 @@ The service starts **automatically on boot**.
 ---
 
 ## ✅ Features
-- ✅ Automatic generator control via relays
-- ✅ Designed for **ACTIVE-HIGH relay boards**
-- ✅ Temperature monitoring (DHT22)
-- ✅ Voltage & current monitoring (INA226)
-- ✅ Physical switch inputs supported
-- ✅ Safe startup (all relays OFF)
-- ✅ Runs as a **systemd service**
-- ✅ Clean install with virtual environment (PEP-668 safe)
-- ✅ Logs to `journalctl`
-- ✅ Minimal Raspberry Pi OS footprint
-
----
-
-## 🧰 Hardware Assumptions
-- Raspberry Pi 3B+ (or compatible)
-- 5 V relay module (ACTIVE-HIGH)
-- Generator with momentary START / STOP control
-- DHT22 temperature sensor
-- INA226 power monitor (optional but recommended)
-- Common ground for all logic-level devices
-
----
-
-## 🔌 GPIO Pin Assignments
-
-### Relays (ACTIVE-HIGH)
-| Relay | Physical Pin | GPIO |
-|------|-------------|------|
-| Relay 1 | Pin 29 | GPIO 5 |
-| Relay 2 | Pin 31 | GPIO 6 |
-| Relay 3 | Pin 33 | GPIO 13 |
-| Relay 4 | Pin 35 | GPIO 19 |
-
-- `GPIO.HIGH` → Relay **ON**
-- `GPIO.LOW` → Relay **OFF**
-- All relays are initialized **OFF** at startup
+- ✅ Automatic generator start/stop
+- ✅ Voltage‑based battery monitoring (INA226)
+- ✅ Temperature‑based control (optional)
+- ✅ Active‑HIGH relay support
+- ✅ Retry logic and minimum runtime enforcement
+- ✅ Email alerts (SMTP)
+- ✅ Safe boot (relays forced OFF)
+- ✅ Designed for unattended RV operation
 
 ---
 
 ## 🔧 RV Generator Wiring Instructions
 
 ⚠️ **IMPORTANT:**  
-This controller interfaces with the **12 V control side** of the RV generator system —  
-**NOT** the 120 V AC output.
+This controller interfaces with the **12 V generator control circuitry**,  
+**NOT the 120 V AC output**.
 
 ### 🔋 Power
-- The Raspberry Pi and relay board must be powered from the RV’s **12 V system**
-- Use a **quality 12 V → 5 V DC converter**
+- Power the Raspberry Pi + relay board from the RV’s **12 V system**
+- Use a **12 V → 5 V DC converter**
 - Ensure **common ground** between:
   - Raspberry Pi
   - Relay board
@@ -127,129 +86,171 @@ This controller interfaces with the **12 V control side** of the RV generator 
 
 ---
 
-### ▶️ Generator START Wiring (Relay 1)
-- **Relay 1** is used for **START**
-- Splice into the generator’s **momentary START switch**
+### ▶️ Generator START (Relay – NO Contact)
+- **START relay** parallels the generator’s momentary START switch
+- Wire using **NO (Normally Open)** only:
   - Relay **COM** → Switch common
   - Relay **NO** → Start signal wire
 
-✅ Manual and automatic start both work  
-✅ Use **NO only** (momentary action)
-
 ---
 
-### ⏹️ Generator STOP Wiring (Relay 2)
-- **Relay 2** is used for **STOP**
-- Wired the same way as START
+### ⏹️ Generator STOP (Relay – NO Contact)
+- Wired the same as START:
   - Relay **COM** → Switch common
   - Relay **NO** → Stop signal wire
 
-✅ Prevents unintended shutdowns  
-✅ Mimics pressing the STOP button
+✅ Manual switch still works  
+✅ Relay mimics a button press  
+✅ No accidental starts on boot or crash
 
 ---
 
-## ⚙️ Configuration (.env File)
+## ⚙️ Configuration (`.env`)
 
-All runtime configuration is handled via a `.env` file in the project directory.
+All runtime behavior is controlled via the `.env` file.
 
-### ✅ Complete Example `.env`
+### ✅ Complete `.env` Example (Sanitized)
+
 ```env
-# ------------------------
-# Relay Configuration
-# ------------------------
-START_RELAY=5
-STOP_RELAY=6
+# ==============================
+# RV Generator Configuration
+# ==============================
 
-START_PULSE_TIME=2
+# Voltage thresholds (volts)
+VOLTAGE_START=11.5
+VOLTAGE_STOP=12.6
+VOLTAGE_RISE_CONFIRM=0.3
+
+# Timing (seconds)
+START_PULSE_TIME=8
 STOP_PULSE_TIME=2
+MIN_RUN_TIME=1800
+RETRY_DELAY=30
+MAX_START_ATTEMPTS=3
 
-# ------------------------
-# Temperature Automation
-# ------------------------
-TEMP_START_THRESHOLD=85
-TEMP_STOP_THRESHOLD=75
+# Temperature control (°F)
+TEMP_ENABLE=false
+TEMP_GPIO=4
+TEMP_START_BELOW=25.0
+TEMP_SAMPLE_INTERVAL=60
 
-ENABLE_DHT22=true
-ENABLE_INA226=true
+# INA226 (Battery Monitor)
+I2C_BUS=1
+INA226_ADDR=0x40
+VOLTAGE_SAMPLE_INTERVAL=10
 
-# ------------------------
+# Relay GPIOs (ACTIVE-HIGH)
+RELAY_START_GPIO=5
+RELAY_STOP_GPIO=6
+
 # Logging
-# ------------------------
-LOG_LEVEL=INFO
+LOG_INTERVAL=30
+LOG_FILE=/usr/local/rv-generator/rv-generator.log
 
-# ------------------------
-# Email / SMTP Alerts
-# ------------------------
-ENABLE_EMAIL_ALERTS=true
+# GPIO chip (libgpiod)
+GPIO_CHIP=/dev/gpiochip4
 
+# ==============================
+# SMTP / Email Settings
+# ==============================
+
+SMTP_ENABLED=true
 SMTP_SERVER=smtp.example.com
 SMTP_PORT=587
-SMTP_USE_TLS=true
-
-SMTP_USERNAME=your_email@example.com
-SMTP_PASSWORD=your_email_password
-
-EMAIL_FROM=rv-generator@example.com
-EMAIL_TO=alert-recipient@example.com
+SMTP_USER=alert@example.com
+SMTP_PASS=your_smtp_password
+SMTP_TLS=true
+SMTP_FROM=rv-generator@example.com
+SMTP_TO=you@example.com
+SMTP_SUBJECT=RV Generator Alert
 ```
 
 ---
 
-### 🔍 `.env` Variable Descriptions
+## 🔍 `.env` Variable Explanations
 
-#### Relay Control
+### 🔋 Voltage Control
 | Variable | Description |
 |--------|-------------|
-| `START_RELAY` | GPIO used to start the generator |
-| `STOP_RELAY` | GPIO used to stop the generator |
-| `START_PULSE_TIME` | Seconds to hold START relay ON |
-| `STOP_PULSE_TIME` | Seconds to hold STOP relay ON |
+| `VOLTAGE_START` | Battery voltage that triggers generator start |
+| `VOLTAGE_STOP` | Voltage at which generator may stop |
+| `VOLTAGE_RISE_CONFIRM` | Required voltage increase to confirm generator is running |
 
 ---
 
-#### Temperature Automation
+### ⏱ Timing & Retry Logic
 | Variable | Description |
 |--------|-------------|
-| `TEMP_START_THRESHOLD` | Temperature (°F) that triggers generator start |
-| `TEMP_STOP_THRESHOLD` | Temperature (°F) that allows generator stop |
-| `ENABLE_DHT22` | Enable temperature sensor |
-| `ENABLE_INA226` | Enable voltage/current monitoring |
+| `START_PULSE_TIME` | Seconds to hold START relay |
+| `STOP_PULSE_TIME` | Seconds to hold STOP relay |
+| `MIN_RUN_TIME` | Minimum generator runtime (seconds) |
+| `RETRY_DELAY` | Delay between failed start attempts |
+| `MAX_START_ATTEMPTS` | Maximum retries before fault |
 
 ---
 
-#### Logging
+### 🌡 Temperature Control
 | Variable | Description |
 |--------|-------------|
-| `LOG_LEVEL` | Log verbosity: `DEBUG`, `INFO`, `WARNING` |
+| `TEMP_ENABLE` | Enable temperature‑based start logic |
+| `TEMP_GPIO` | GPIO pin for DHT22 data |
+| `TEMP_START_BELOW` | Temperature (°F) to start generator |
+| `TEMP_SAMPLE_INTERVAL` | Seconds between temp readings |
 
 ---
 
-#### Email / SMTP Alerts
+### 🔌 INA226 Power Monitor
 | Variable | Description |
 |--------|-------------|
-| `ENABLE_EMAIL_ALERTS` | Enable email notifications |
+| `I2C_BUS` | I²C bus number |
+| `INA226_ADDR` | INA226 I²C address |
+| `VOLTAGE_SAMPLE_INTERVAL` | Voltage read interval (seconds) |
+
+---
+
+### 🔁 Relays & GPIO
+| Variable | Description |
+|--------|-------------|
+| `RELAY_START_GPIO` | GPIO pin for START relay |
+| `RELAY_STOP_GPIO` | GPIO pin for STOP relay |
+| `GPIO_CHIP` | GPIO chip device for libgpiod |
+
+---
+
+### 📝 Logging
+| Variable | Description |
+|--------|-------------|
+| `LOG_INTERVAL` | Log write interval |
+| `LOG_FILE` | Log file path |
+
+---
+
+### 📧 SMTP / Email Alerts
+| Variable | Description |
+|--------|-------------|
+| `SMTP_ENABLED` | Enable email alerts |
 | `SMTP_SERVER` | SMTP server hostname |
-| `SMTP_PORT` | SMTP server port (usually 587) |
-| `SMTP_USE_TLS` | Enable TLS encryption |
-| `SMTP_USERNAME` | SMTP login username |
-| `SMTP_PASSWORD` | SMTP login password |
-| `EMAIL_FROM` | Sender email address |
-| `EMAIL_TO` | Recipient email address |
+| `SMTP_PORT` | SMTP server port |
+| `SMTP_USER` | SMTP username |
+| `SMTP_PASS` | SMTP password |
+| `SMTP_TLS` | Enable TLS encryption |
+| `SMTP_FROM` | Sender address |
+| `SMTP_TO` | Recipient address |
+| `SMTP_SUBJECT` | Email subject |
 
-📧 Email alerts can be used for:
-- Generator start/stop events
-- Fault conditions
-- Temperature alerts
+Alerts can notify on:
+- Generator start / stop
+- Voltage faults
+- Failed start attempts
 
 ---
 
 ## ⚠️ Safety Notes
-- Relays are **forced OFF at boot**
-- Always test with generator **disabled**
+- Relays default **OFF at boot**
+- Test with generator disabled
 - Fuse all added wiring
-- Verify generator control voltages before connecting
-- Assumes **momentary switch logic**
+- Verify generator control voltages
+- Designed for **momentary switch logic only**
 
 ---
 
