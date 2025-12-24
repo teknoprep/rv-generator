@@ -105,21 +105,79 @@ The service starts **automatically on boot**.
 | Relay 3 | Pin 33 | GPIO 13 |
 | Relay 4 | Pin 35 | GPIO 19 |
 
-- `GPIO.HIGH` → Relay **ON**  
-- `GPIO.LOW` → Relay **OFF**  
+- `GPIO.HIGH` → Relay **ON**
+- `GPIO.LOW` → Relay **OFF**
 - All relays are initialized **OFF** at startup
 
 ---
 
-### I²C (INA226)
-| Signal | GPIO | Pin |
-|------|------|-----|
-| SDA | GPIO 2 | Pin 3 |
-| SCL | GPIO 3 | Pin 5 |
+## 🔧 RV Generator Wiring Instructions
+
+⚠️ **IMPORTANT:**  
+This controller interfaces with the **12 V control side** of the RV generator system —  
+**NOT** the 120 V AC output.
+
+### 🔋 Power
+- The Raspberry Pi and relay board must be powered from the RV’s **12 V system**
+- Use a **quality 12 V → 5 V DC converter** capable of supplying the Pi + relays
+- Ensure **common ground** between:
+  - Raspberry Pi
+  - Relay board
+  - Generator control wiring
 
 ---
 
-### 🌡️ Temperature Sensor (DHT22)
+### ▶️ Generator START Wiring (Relay 1)
+
+- **Relay 1** is used for **START**
+- Locate the generator’s **momentary START switch**
+- Identify:
+  - **Common**
+  - **Start signal wire**
+
+#### Wiring Method
+- Leave the factory switch intact
+- **Splice** into the START circuit:
+  - Relay **COM** → Common wire on start switch
+  - Relay **NO (Normally Open)** → Start signal wire
+
+✅ This allows:
+- Manual starting via the original switch
+- Automatic starting via the relay
+
+❗ Use **NO only** — you only want to close the circuit when issuing a START command.
+
+---
+
+### ⏹️ Generator STOP Wiring (Relay 2)
+
+- **Relay 2** is used for **STOP**
+- Locate the generator’s **momentary STOP switch**
+- Identify:
+  - **Common**
+  - **Stop signal wire**
+
+#### Wiring Method
+- Same as START:
+  - Relay **COM** → Common wire on stop switch
+  - Relay **NO (Normally Open)** → Stop signal wire
+
+✅ Manual stop still works  
+✅ Relay issues a momentary STOP when commanded
+
+---
+
+### ✅ Why NO (Normally Open)?
+- Prevents accidental start/stop on:
+  - Boot
+  - Power loss
+  - Software crash
+- Relay only closes the circuit **intentionally**
+- Mimics a human pressing the button
+
+---
+
+## 🌡️ Temperature Sensor (DHT22)
 | Signal | GPIO | Pin |
 |------|------|-----|
 | DATA | GPIO 4 | Pin 7 |
@@ -128,11 +186,53 @@ The service starts **automatically on boot**.
 
 ---
 
+## ⚙️ Configuration (.env File)
+
+Configuration is handled via a `.env` file located in the project directory.
+
+### Example `.env`
+```env
+START_RELAY=5
+STOP_RELAY=6
+
+START_PULSE_TIME=2
+STOP_PULSE_TIME=2
+
+TEMP_START_THRESHOLD=85
+TEMP_STOP_THRESHOLD=75
+
+ENABLE_INA226=true
+ENABLE_DHT22=true
+
+LOG_LEVEL=INFO
+```
+
+---
+
+### 🔍 Variable Descriptions
+
+| Variable | Description |
+|--------|-------------|
+| `START_RELAY` | GPIO number used for generator START |
+| `STOP_RELAY` | GPIO number used for generator STOP |
+| `START_PULSE_TIME` | Seconds to hold START relay ON |
+| `STOP_PULSE_TIME` | Seconds to hold STOP relay ON |
+| `TEMP_START_THRESHOLD` | Temperature (°F) to auto‑start generator |
+| `TEMP_STOP_THRESHOLD` | Temperature (°F) to stop generator |
+| `ENABLE_INA226` | Enable voltage/current monitoring |
+| `ENABLE_DHT22` | Enable temperature monitoring |
+| `LOG_LEVEL` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`) |
+
+💡 These values can be adjusted without changing code.
+
+---
+
 ## ⚠️ Safety Notes
-- Relays are **forced OFF at boot** to prevent unintended generator starts
-- Always test with the generator **disabled** before live operation
-- Ensure proper fuse protection and isolation where required
-- Use a common ground for all logic-level components
+- Relays are **forced OFF at boot**
+- Always test with generator **disabled**
+- Fuse all added wiring appropriately
+- Verify generator control voltages before connecting
+- This project assumes **momentary switch logic**
 
 ---
 
@@ -142,6 +242,7 @@ rv-generator/
 ├── README.md
 ├── install.sh
 ├── board1.jpg
+├── .env
 ├── src/
 ├── systemd/
 └── scripts/
