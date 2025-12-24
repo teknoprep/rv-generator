@@ -119,7 +119,7 @@ This controller interfaces with the **12 V control side** of the RV generator 
 
 ### 🔋 Power
 - The Raspberry Pi and relay board must be powered from the RV’s **12 V system**
-- Use a **quality 12 V → 5 V DC converter** capable of supplying the Pi + relays
+- Use a **quality 12 V → 5 V DC converter**
 - Ensure **common ground** between:
   - Raspberry Pi
   - Relay board
@@ -128,111 +128,128 @@ This controller interfaces with the **12 V control side** of the RV generator 
 ---
 
 ### ▶️ Generator START Wiring (Relay 1)
-
 - **Relay 1** is used for **START**
-- Locate the generator’s **momentary START switch**
-- Identify:
-  - **Common**
-  - **Start signal wire**
+- Splice into the generator’s **momentary START switch**
+  - Relay **COM** → Switch common
+  - Relay **NO** → Start signal wire
 
-#### Wiring Method
-- Leave the factory switch intact
-- **Splice** into the START circuit:
-  - Relay **COM** → Common wire on start switch
-  - Relay **NO (Normally Open)** → Start signal wire
-
-✅ This allows:
-- Manual starting via the original switch
-- Automatic starting via the relay
-
-❗ Use **NO only** — you only want to close the circuit when issuing a START command.
+✅ Manual and automatic start both work  
+✅ Use **NO only** (momentary action)
 
 ---
 
 ### ⏹️ Generator STOP Wiring (Relay 2)
-
 - **Relay 2** is used for **STOP**
-- Locate the generator’s **momentary STOP switch**
-- Identify:
-  - **Common**
-  - **Stop signal wire**
+- Wired the same way as START
+  - Relay **COM** → Switch common
+  - Relay **NO** → Stop signal wire
 
-#### Wiring Method
-- Same as START:
-  - Relay **COM** → Common wire on stop switch
-  - Relay **NO (Normally Open)** → Stop signal wire
-
-✅ Manual stop still works  
-✅ Relay issues a momentary STOP when commanded
-
----
-
-### ✅ Why NO (Normally Open)?
-- Prevents accidental start/stop on:
-  - Boot
-  - Power loss
-  - Software crash
-- Relay only closes the circuit **intentionally**
-- Mimics a human pressing the button
-
----
-
-## 🌡️ Temperature Sensor (DHT22)
-| Signal | GPIO | Pin |
-|------|------|-----|
-| DATA | GPIO 4 | Pin 7 |
-| VCC | 3.3 V | Pin 1 |
-| GND | GND | Any |
+✅ Prevents unintended shutdowns  
+✅ Mimics pressing the STOP button
 
 ---
 
 ## ⚙️ Configuration (.env File)
 
-Configuration is handled via a `.env` file located in the project directory.
+All runtime configuration is handled via a `.env` file in the project directory.
 
-### Example `.env`
+### ✅ Complete Example `.env`
 ```env
+# ------------------------
+# Relay Configuration
+# ------------------------
 START_RELAY=5
 STOP_RELAY=6
 
 START_PULSE_TIME=2
 STOP_PULSE_TIME=2
 
+# ------------------------
+# Temperature Automation
+# ------------------------
 TEMP_START_THRESHOLD=85
 TEMP_STOP_THRESHOLD=75
 
-ENABLE_INA226=true
 ENABLE_DHT22=true
+ENABLE_INA226=true
 
+# ------------------------
+# Logging
+# ------------------------
 LOG_LEVEL=INFO
+
+# ------------------------
+# Email / SMTP Alerts
+# ------------------------
+ENABLE_EMAIL_ALERTS=true
+
+SMTP_SERVER=smtp.example.com
+SMTP_PORT=587
+SMTP_USE_TLS=true
+
+SMTP_USERNAME=your_email@example.com
+SMTP_PASSWORD=your_email_password
+
+EMAIL_FROM=rv-generator@example.com
+EMAIL_TO=alert-recipient@example.com
 ```
 
 ---
 
-### 🔍 Variable Descriptions
+### 🔍 `.env` Variable Descriptions
 
+#### Relay Control
 | Variable | Description |
 |--------|-------------|
-| `START_RELAY` | GPIO number used for generator START |
-| `STOP_RELAY` | GPIO number used for generator STOP |
+| `START_RELAY` | GPIO used to start the generator |
+| `STOP_RELAY` | GPIO used to stop the generator |
 | `START_PULSE_TIME` | Seconds to hold START relay ON |
 | `STOP_PULSE_TIME` | Seconds to hold STOP relay ON |
-| `TEMP_START_THRESHOLD` | Temperature (°F) to auto‑start generator |
-| `TEMP_STOP_THRESHOLD` | Temperature (°F) to stop generator |
-| `ENABLE_INA226` | Enable voltage/current monitoring |
-| `ENABLE_DHT22` | Enable temperature monitoring |
-| `LOG_LEVEL` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`) |
 
-💡 These values can be adjusted without changing code.
+---
+
+#### Temperature Automation
+| Variable | Description |
+|--------|-------------|
+| `TEMP_START_THRESHOLD` | Temperature (°F) that triggers generator start |
+| `TEMP_STOP_THRESHOLD` | Temperature (°F) that allows generator stop |
+| `ENABLE_DHT22` | Enable temperature sensor |
+| `ENABLE_INA226` | Enable voltage/current monitoring |
+
+---
+
+#### Logging
+| Variable | Description |
+|--------|-------------|
+| `LOG_LEVEL` | Log verbosity: `DEBUG`, `INFO`, `WARNING` |
+
+---
+
+#### Email / SMTP Alerts
+| Variable | Description |
+|--------|-------------|
+| `ENABLE_EMAIL_ALERTS` | Enable email notifications |
+| `SMTP_SERVER` | SMTP server hostname |
+| `SMTP_PORT` | SMTP server port (usually 587) |
+| `SMTP_USE_TLS` | Enable TLS encryption |
+| `SMTP_USERNAME` | SMTP login username |
+| `SMTP_PASSWORD` | SMTP login password |
+| `EMAIL_FROM` | Sender email address |
+| `EMAIL_TO` | Recipient email address |
+
+📧 Email alerts can be used for:
+- Generator start/stop events
+- Fault conditions
+- Temperature alerts
 
 ---
 
 ## ⚠️ Safety Notes
 - Relays are **forced OFF at boot**
 - Always test with generator **disabled**
-- Fuse all added wiring appropriately
+- Fuse all added wiring
 - Verify generator control voltages before connecting
-- This project assumes **momentary switch logic**
+- Assumes **momentary switch logic**
 
 ---
 
